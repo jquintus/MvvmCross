@@ -9,6 +9,7 @@ using System;
 using System.IO;
 using Android.App;
 using Android.Content;
+using Android.Database;
 using Android.Graphics;
 using Android.Provider;
 using Cirrious.CrossCore.Droid;
@@ -129,8 +130,10 @@ namespace Cirrious.MvvmCross.Plugins.PictureChooser.Droid
                     return;
                 }
 
+                MvxTrace.Trace("Getting orientation of the selected image");
+                int orientation = GetOrientation(uri);
                 MvxTrace.Trace("Loading InMemoryBitmap started...");
-                var memoryStream = LoadInMemoryBitmap(uri);
+                var memoryStream = LoadInMemoryBitmap(uri, orientation);
                 MvxTrace.Trace("Loading InMemoryBitmap complete...");
                 responseSent = true;
                 MvxTrace.Trace("Sending pictureAvailable...");
@@ -146,13 +149,39 @@ namespace Cirrious.MvvmCross.Plugins.PictureChooser.Droid
                 _currentRequestParameters = null;
             }
         }
+        private int GetOrientation(Uri uri)
+        {
+            try
+            {
+                var cr = Mvx.Resolve<IMvxAndroidGlobals>().ApplicationContext.ContentResolver;
 
-        private MemoryStream LoadInMemoryBitmap(Uri uri)
+                using (ICursor cursor = cr.Query(uri, new string[] { MediaStore.Images.Media.InterfaceConsts.Orientation }, null, null, null))
+                {
+                    if (!(cursor.MoveToFirst()) || cursor.Count == 0) return 0;
+
+                    int columnIndex = cursor.GetColumnIndex(MediaStore.Images.Media.InterfaceConsts.Orientation);
+                    if (columnIndex < 0) return 0;
+                    int orientation = cursor.GetInt(columnIndex);
+
+                    return orientation;
+                }
+            }
+            catch (System.Exception ex)
+            {
+                // This shouldn't happen but in case it does, we're ready for it.
+                MvxTrace.Trace("Error getting image roataion from URI:   " + ex.Message);
+
+                return 0;
+            }
+        }
+
+        private MemoryStream LoadInMemoryBitmap(Uri uri, int orientation)
         {
             var memoryStream = new MemoryStream();
             using (Bitmap bitmap = LoadScaledBitmap(uri))
+            using (Bitmap rotatedBitmap = RotateBitmap(bitmap, orientation))
             {
-                bitmap.Compress(Bitmap.CompressFormat.Jpeg, _currentRequestParameters.PercentQuality, memoryStream);
+                rotatedBitmap.Compress(Bitmap.CompressFormat.Jpeg, _currentRequestParameters.PercentQuality, memoryStream);
             }
             memoryStream.Seek(0L, SeekOrigin.Begin);
             return memoryStream;
@@ -199,6 +228,13 @@ namespace Cirrious.MvvmCross.Plugins.PictureChooser.Droid
                 var maxDimensionSize = Math.Max(optionsJustBounds.OutWidth, optionsJustBounds.OutHeight);
                 return maxDimensionSize;
             }
+        }
+
+        private Bitmap RotateBitmap(Bitmap source, int orientation)
+        {
+            var matrix = new Matrix();
+            matrix.PostRotate(orientation);
+            return Bitmap.CreateBitmap(source, 0, 0, source.Width, source.Height, matrix, true);
         }
 
         #region Nested type: RequestParameters
